@@ -5,7 +5,7 @@ import struct
 import subprocess
 import warnings
 import fortranformat as ff
-from src.CSTR_plot import plot_signals, plotscatter, plot_PCA
+from src.CSTR_plot import plot_signals, plotscatter
 
 
 class Fault():
@@ -1005,42 +1005,42 @@ class CSTR():
             print('F1-F4+F6-F3:  SUM= %17.6f' % (self.FLOW[0] - self.FLOW[3] +
                                                  self.FLOW[5] - self.FLOW[2]))
 
-    def run_experiment(experiment, do_run=True, do_plot=True):
+def run_experiment(experiment, do_run=True, do_plot=True):
 
-        e = experiment
-        cstr = CSTR(id=e['id'],
-                    theta=e['theta'], randseed=e['randseed'],
-                    fortran_rand=e['fortran_rand'],
-                    faults=e['faults'],
-                    timehoriz=e['timehoriz'])
+    e = experiment
+    cstr = CSTR(id=e['id'],
+                theta=e['theta'], randseed=e['randseed'],
+                fortran_rand=e['fortran_rand'],
+                faults=e['faults'],
+                timehoriz=e['timehoriz'])
 
-        if do_run:
-            cstr.open()
-            cstr.run()
-            cstr.close()
-        feat1 = 1
-        feat2 = 11
-        feat3 = 14
-        mask = e['plotmask']
-        # mask = [feat1, feat2, feat3]
-        # mask = None
-        # return
+    if do_run:
+        cstr.open()
+        cstr.run()
+        cstr.close()
+    feat1 = 1
+    feat2 = 11
+    feat3 = 14
+    mask = e['plotmask']
+    # mask = [feat1, feat2, feat3]
+    # mask = None
+    # return
 
-        block = True
-        # block = False
-        if do_plot:
-            plot_signals(cstr, mask=mask, block=block)
+    block = True
+    # block = False
+    if do_plot:
+        plot_signals(cstr, mask=mask, block=block)
 
-        # return cstr
+    # return cstr
 
-        feat3 = None
+    feat3 = None
 
-        if do_plot:
-            azim = -22; elev = 12
-            azim = -24; elev = 7
-            plotscatter(cstr, feat1=feat1, feat2=feat2, feat3=feat3,
-                        standardize=True,
-                        dropfigfile=cstr.datarootdir+str(e['id']),
-                        title='CSTR: Condition in Feature Space',
-                        block=block, azim=azim, elev=elev)
-        return cstr
+    if do_plot:
+        azim = -22; elev = 12
+        azim = -24; elev = 7
+        plotscatter(cstr, feat1=feat1, feat2=feat2, feat3=feat3,
+                    standardize=True,
+                    dropfigfile=cstr.datarootdir+str(e['id']),
+                    title='CSTR: Condition in Feature Space',
+                    block=block, azim=azim, elev=elev)
+    return cstr

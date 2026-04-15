@@ -7,7 +7,7 @@ import sys
 sys.path.append('../')
 #sys.path.append('../../')
 
-from defines import defines
+from src.defines import defines
 rootdir = defines['rootdir']
 
 # https://stackoverflow.com/questions/42086276/get-default-line-colour-cycle

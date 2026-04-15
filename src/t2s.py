@@ -1,8 +1,8 @@
 import numpy as np
 from scipy.linalg import sqrtm
-from threshold import threshold
+from src.threshold import threshold
 import matplotlib.pyplot as plt
-from util import fig2file
+from src.util import fig2file
 
 def t2s(y, M, stat_type='t2',
         title=None, ax=None,
