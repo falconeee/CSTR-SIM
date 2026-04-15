@@ -1,1 +1,0 @@
-gfortran -O3 -o cstr cstr.f
