@@ -66,22 +66,7 @@ acronyms = ('c_A0', 'Q_1', 'T_1', 'L',
 
 
 def print_acronyms(file=sys.stdout, truncate=None):
-    numacro = len(acronyms)
-    if truncate is not None:
-        print('%7s' % '',  end=' ', file=file)
-        fmt = '%' + str(truncate) + 's'
-        last = truncate + 1
-    else:
-        fmt = '%30s'
-        last = 30
-
-    end = ';'
-    for i in range(numacro):
-        a = str(acronyms[i][:last])
-        if i == numacro - 1:
-            end = ''
-        print(fmt % a, end=end, file=file)
-    print(file=file)
+    print(';'.join(acronyms), file=file)
 
 
 class CSTR():
@@ -113,7 +98,7 @@ class CSTR():
         self.verbose = verbose
         self.acronyms = acronyms
 
-        self.datarootdir = './output/'
+        self.datarootdir = './data/'
         if self.id is None:
             self.datafn = self.datarootdir + 'X_py.csv'
         else:
@@ -653,9 +638,12 @@ class CSTR():
     def measure_out(self):
         M = self.MEAS2
         lineformat = ff.FortranRecordWriter('(E15.5)')
+        
         for s in range(self.numvar):
             mstr = lineformat.write([M[s]])
-            print('%15s' % mstr, file=self.outfile, end=';')
+            # Imprime a string limpa (.strip()) seguida do ponto e vírgula
+            print(mstr.strip(), file=self.outfile, end=';')
+            
         self.set_classstr()
         print(self.classstr, file=self.outfile)
 
