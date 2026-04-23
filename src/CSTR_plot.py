@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-# import seaborn as sns
 import pickle
 import copy
 import pandas as pd
@@ -9,6 +8,9 @@ from datetime import datetime
 from sklearn.preprocessing import LabelEncoder
 from sklearn.preprocessing import StandardScaler
 from sklearn.manifold import TSNE
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 
 
 def cm2inch(cm): return cm/2.54
@@ -135,157 +137,54 @@ def dataframe2sklearn(df):
     return X, labels, featname
 
 
-def plot_signals(cstr, mask=None, title=None, dropdir=None,
-                 figext='pgf', block=False):
-    """Plot multichannel signal."""
-
+def plot_signals(cstr, mask=None, title='CSTR Variables', dropdir=None, block=False):
+    """Plot multichannel signal using Plotly."""
+    
     datafn = cstr.datafn
-    print('Opening input data file %s.' % datafn)
-    df = read_X(datafn=datafn)
-    X, y, featname = dataframe2sklearn(df)
-    labels = y
-    # print('labels =\n', labels); input('...')
-
-    # plot the multi-channel signal
-    n, numsensors = X.shape
-    x = np.linspace(0, n-1, n)
-
-    NORMVAL = cstr.NORMVAL
+    print(f'Opening input data file: {datafn}')
+    
+    # Carrega os dados gerados
+    df_dataset = pd.read_csv(datafn, sep=";")
+    
+    # Seleciona apenas as colunas numéricas
+    df_num = df_dataset.select_dtypes(include=['number'])
+    colunas = df_num.columns
+    
+    # Aplica a máscara se houver (para plotar apenas variáveis específicas)
     if mask is not None:
-        X, featname = filter_vars(X, featname, mask)
-        NORMVAL = filter_featname(cstr.NORMVAL, mask)
-    # print('X.shape=', X.shape, 'featname=', featname, 'NORMVAL=', NORMVAL); input('...')
+        colunas = [colunas[i-1] for i in mask if (i-1) < len(colunas)]
+        df_num = df_num[colunas]
 
-    n, numsensors = X.shape
-    usetex = True
-    tex_setup(usetex=usetex)
-    # https://stackoverflow.com/questions/42086276/get-default-line-colour-cycle
-    default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-    # print('pyplot.default_colors=', default_colors)
-    color = default_colors
-    color_lim = default_colors[5:]
-    # color = ('g', 'y', 'r', 'b', 'm', 'g', 'y', 'r', 'b', 'm')
-    # print('color_lim=', color_lim)
+    num_variaveis = len(colunas)
+    
+    # Cria os subplots empilhados
+    fig = make_subplots(
+        rows=num_variaveis, 
+        cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.005
+    )
 
-    if numsensors > 1:
-        fig, ax = plt.subplots(numsensors, 1, sharex=True)
-    else:
-        fig, ax1 = plt.gcf(), plt.gca()
-        ax = [ax1, ]
-    widthcm = 10  # Real sizes later in the LaTeX file
-    heigthcm = 15
-    nlegcol = 3
-    fontsize = 7
-    linewidth = 0.5
-    fig.set_size_inches([cm2inch(widthcm), cm2inch(heigthcm)])
-    ax[numsensors-1].set_xlabel('$t$ [min]', fontsize=fontsize)
+    # Adiciona cada variável
+    for i, col in enumerate(colunas):
+        fig.add_trace(go.Scatter(
+            x=df_num.index, 
+            y=df_num[col], 
+            mode='lines', 
+            name=col
+        ), row=i+1, col=1)
+        
+        fig.update_yaxes(title_text=col, row=i+1, col=1)
 
-    for s in range(numsensors):
-        ylabel = featname[s]
-        ax[s].set_ylabel(ylabel, rotation=0, labelpad=0,
-                         verticalalignment='center',
-                         horizontalalignment='right',
-                         usetex=usetex, fontsize=8)
-        ax[s].xaxis.set_major_locator(MaxNLocator(integer=True))
+    # Layout final
+    fig.update_layout(
+        height=120 * num_variaveis, 
+        title=title,
+        hovermode='x unified',
+        showlegend=False
+    )
 
-    faults = cstr.faults
-    # print('plot_signals> faults=', faults); raise SystemExit
-
-    cond = 'normal'
-
-    def fstr(f):
-        if f.id is None:
-            return 'normal'
-        elif f.is_sensor_fault:
-            return 'Sensor fault ' + str(f.id)
-        else:
-            return 'Fault ' + str(f.id)
-
-    t = 0
-    start = t
-    i = 0
-    for f in faults:
-        ftriggered = f.DELAY
-        if ftriggered == 0:
-            cond = fstr(f)
-        if ftriggered == np.inf:
-            stop = n
-        else:
-            stop = ftriggered + 1
-        # print('fault train: id=', f.id, 'DELAY=', f.DELAY)
-        for s in range(numsensors):
-            signal = X[:, s]
-            # print('start=', start, 'stop=', stop, 'cond=', cond)
-            if f.id is None:
-                label = 'normal'
-            else:
-                label = cond
-
-            ax[s].plot(x[start:stop], signal[start:stop], color=color[i],
-                       linestyle='-', linewidth=linewidth, label=label)
-            ax[s].axhline(y=NORMVAL[s], linestyle='--', linewidth=0.5,
-                          label=None, color='green')
-            label = fstr(f) + ' triggered'
-            label = label_set_cond(s == 0 and f.id is not None, label)
-            if f.id is not None:
-                ax[s].axvline(x=ftriggered, linestyle='--', color=color_lim[i],
-                              linewidth=1.0, label=label)
-
-        start = stop - 1
-        i += 1
-        # print('BEFORE: cond=', cond, 'f.id=', f.id)
-        aux = fstr(f)
-        if aux == f.id:
-            cond = aux
-        else:
-            if cond != 'normal' and f.id is not None:
-                cond += '+' + aux
-            else:
-                cond = aux
-    if faults != []:
-        print('BEFORE LAST: f.id=', fstr(f), 'cond=', cond,
-              'start=', start, 'stop=', stop, 'n=', n)
-
-    #if stop != n:
-    if True:
-        stop = n
-        for s in range(numsensors):
-            signal = X[:, s]
-            ax[s].plot(x[start:stop], signal[start:stop], color=color[i],
-                       linestyle='-', linewidth=linewidth, label=cond)
-            # print('start=', start, 'stop=', stop, 'label=', label)
-
-    fig.suptitle(title, fontsize=fontsize)
-    # The legend is relative to the whole figure, not relative
-    # to the current axis
-    handles, labels = ax[0].get_legend_handles_labels()
-    # print('legend: handles=', handles, '\nlabels=', labels)
-
-    fig.legend(handles, labels, fontsize=7,
-               loc='upper center',  # 'lower left',
-               # bbox_to_anchor=(0.0, 0.0),
-               fancybox=True, shadow=True,
-               ncol=nlegcol)
-    plt.axis('tight')
-    # input('...')
-
-    if dropdir is not None:
-        dt = datetime.now().strftime(
-            '%Y_%m_%d__%H.%M.%S.%f')  # avoid ":"
-        aux = (dropdir + dt + '_' + str(numsensors)
-               + '_variable_train_test_signal_evolution.')
-        dropfigfile = aux + figext
-        plt.savefig(dropfigfile)
-        print('CSTR.train_test_pair_signal_plot> Saving figure in ',
-              dropfigfile)
-        dropfigfile = aux + 'pdf'
-        plt.savefig(dropfigfile)
-        print('CSTR.train_test_pair_signal_plot> Saving figure in ',
-              dropfigfile)
-    # if save_fig_for_later_name is not None:
-        # print('Saving plot for later use as ', save_fig_for_later_name)
-        # save_obj(ax, save_fig_for_later_name) # must be stricly BEFORE plt.show
-    plt.show(block=block)
+    fig.show()
 
 
 def plot_condition(X, y, ynum, classlabel, classname, featname,
@@ -525,61 +424,95 @@ def plot_tSNE(X, y, n_components=3, plot_time_axis=False,
 
 def plotscatter(cstr, feat1, feat2, feat3=None,
                 standardize=False,
-                dropfigfile=None,
-                title='CSTR: Condition in Feature Space', block=False,
-                azim=-22, elev=11):
-
+                title='CSTR: Condition in Feature Space'):
+    """
+    Gera um gráfico de dispersão (scatter plot) interativo 2D ou 3D das variáveis do CSTR.
+    """
     datafn = cstr.datafn
-    print('Opening input data file %s.' % datafn)
-    df = read_X(datafn=datafn)
-    X, y, featname = dataframe2sklearn(df)
-    print('X.shape=', X.shape, 'y.shape=', y.shape, 'featname=', featname)
-    labels = y
-    ynum = LabelEncoder().fit_transform(y)
-    # print('ynum=\n', ynum)
+    print(f'Opening input data file: {datafn}')
+    
+    # 1. Carrega os dados diretamente pelo Pandas
+    df = pd.read_csv(datafn, sep=";")
+    
+    # Remove espaços em branco do nome das colunas (para evitar erros ao chamar a coluna CLASS)
+    df.columns = df.columns.str.strip()
+    
+    # Garante que as features existem no DataFrame. Subtrai 1 se seus parâmetros (feat1, etc) usarem base 1.
+    colunas_numericas = df.select_dtypes(include=['number']).columns
+    var1 = colunas_numericas[feat1 - 1]
+    var2 = colunas_numericas[feat2 - 1]
+    
+    colunas_filtro = [var1, var2]
+    var3 = None
+    if feat3 is not None:
+        var3 = colunas_numericas[feat3 - 1]
+        colunas_filtro.append(var3)
 
-    classlabel, idx = np.unique(ynum, return_index=True)
-    print('classlabel=', classlabel, 'idx=', idx)
-
-    idxt, classlabel = zip(*sorted(zip(idx, classlabel)))
-    time_offsets = idxt
-    print('classlabel=', classlabel, 'idxt=', idxt)
-
-    classname = np.unique(labels)
-    _, classname = zip(*sorted(zip(idx, classname)))
-    print('classname=', classname)  # ; input('...')
-
-    # plot the multi-channel signal
-    n, d = X.shape
-    if feat3 is None:
-        mask = [feat1, feat2]
-    else:
-        mask = [feat1, feat2, feat3]
-
-    X, featname = filter_vars(X, featname, mask)
-    # NORMVAL = filter_featname(cstr.NORMVAL, mask)
-    # print('after filter_vars: X.shape=', X.shape, 'featname=', featname)
-
-    n, numsensors = X.shape
-
-    # print('X.shape=', X.shape, '\ny=\n', y, '\nynum=\n',
-    #       ynum, 'shape=', ynum.shape, '\nnumclasses=', numclasses,
-    #       'classname=', classname, 'classlabel=', classlabel); input('...')
-
+    # 2. Padronização (Opcional)
     if standardize:
-        print('Standardizing data ...')
-        X = StandardScaler().fit_transform(X)
+        print('Standardizing data (Z-score)...')
+        scaler = StandardScaler()
+        # Aplica padronização apenas nas colunas numéricas selecionadas
+        df[colunas_filtro] = scaler.fit_transform(df[colunas_filtro])
+        
+        # Atualiza os nomes das variáveis nos eixos para indicar a padronização
+        var1_label = f"{var1} (Standardized)"
+        var2_label = f"{var2} (Standardized)"
+        var3_label = f"{var3} (Standardized)" if var3 else None
+        
+        df = df.rename(columns={var1: var1_label, var2: var2_label})
+        if var3:
+            df = df.rename(columns={var3: var3_label})
+            
+        var1, var2, var3 = var1_label, var2_label, var3_label
 
-    plot_time_axis = True
-    if numsensors == 3:
-        plot_time_axis = False
-    plot_condition(X, y, ynum, classlabel, classname, featname,
-                   plot_time_axis=plot_time_axis,
-                   time_offsets=time_offsets,
-                   dropfigfile=dropfigfile,
-                   title=title, block=block, azim=azim, elev=elev)
+    # Adiciona a coluna de tempo/amostra para visualizar no hover
+    df['Time_Index'] = df.index
 
-    # raise Exception()
+    # 3. Geração do Gráfico Plotly
+    # O parâmetro 'color' agrupa automaticamente os pontos pela classe de falha
+    if feat3 is None:
+        # Plot 2D
+        fig = px.scatter(
+            df, 
+            x=var1, 
+            y=var2, 
+            color='CLASS', # Colore de acordo com a falha (normal, S2, 2+3, etc)
+            hover_data=['Time_Index'], # Mostra a iteração do tempo no mouse
+            title=title,
+            color_discrete_sequence=px.colors.qualitative.Set1 # Paleta de cores nítida
+        )
+    else:
+        # Plot 3D
+        fig = px.scatter_3d(
+            df, 
+            x=var1, 
+            y=var2, 
+            z=var3, 
+            color='CLASS', 
+            hover_data=['Time_Index'],
+            title=title,
+            color_discrete_sequence=px.colors.qualitative.Set1
+        )
+        
+        # Ajusta as proporções e remove fundo do gráfico 3D para ficar mais limpo
+        fig.update_layout(
+            scene=dict(
+                xaxis_title=var1,
+                yaxis_title=var2,
+                zaxis_title=var3,
+                aspectmode='cube'
+            )
+        )
+
+    # Melhorias gerais no layout
+    fig.update_layout(
+        legend_title_text='Condição do Reator',
+        height=700, # Gráfico maior para facilitar a visualização da dispersão
+        hovermode='closest'
+    )
+
+    fig.show()
 
 
 def train_test_pair_signal_plot(cstr, exp_train, exp_test, mask=None,

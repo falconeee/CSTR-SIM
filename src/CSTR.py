@@ -694,7 +694,7 @@ class CSTR():
         print('Data Genaration successfully completed!')
 
 
-def run_experiment(experiment, do_run=True, do_plot=True):
+def run_experiment(experiment, do_run=True, do_plot=True, do_plot_scatter=False):
     e = experiment
     cstr = CSTR(id=e['id'],
                 theta=e['theta'], randseed=e['randseed'],
@@ -718,12 +718,12 @@ def run_experiment(experiment, do_run=True, do_plot=True):
 
     feat3 = None
 
-    if do_plot:
-        azim = -22; elev = 12
-        azim = -24; elev = 7
-        plotscatter(cstr, feat1=feat1, feat2=feat2, feat3=feat3,
-                    standardize=True,
-                    dropfigfile=cstr.datarootdir+str(e['id']),
-                    title='CSTR: Condition in Feature Space',
-                    block=block, azim=azim, elev=elev)
+    if do_plot_scatter:
+        plotscatter(cstr, 
+            feat1=feat1, 
+            feat2=feat2, 
+            feat3=feat3, # Se for None, plota 2D; se tiver valor, plota 3D
+            standardize=True,
+            title='CSTR: Condition in Feature Space'
+        )
     return cstr
