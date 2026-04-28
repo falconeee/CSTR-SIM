@@ -291,7 +291,7 @@ class MSCVAE_Hybrid(nn.Module):
 
         return recon_matrix, recon_values, mu, logvar
 
-    def loss_function(self, recon_matrix, x_matrix, recon_values, x_values, mu, logvar, alpha=5.0, beta=0.6):
+    def loss_function(self, recon_matrix, x_matrix, recon_values, x_values, mu, logvar, alpha=2.0, beta=0.6):
         """
         Multitask Loss Function (Beta-VAE framework).
         """
