@@ -223,11 +223,13 @@ class TranAD:
         self.seed = seed
         
         self.set_deterministic(self.seed)
-        self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+        print(f"Using device: {self.device}")
         
         self.scaler = MinMaxScaler()
         self.model = None
-        self.threshold = None
+        self.thresholds = None
+        self.threshold = 1.0 # Backward compatibility para scripts externos (o phi agora é relativo, limiar passa a ser 1.0)
         self.gain = 1.0
         self.n_features = None
         self.feature_names = None
@@ -251,14 +253,15 @@ class TranAD:
             for (inputs,) in loader:
                 inputs = inputs.to(self.device)
                 window_input = inputs.permute(1, 0, 2) # [Seq, Batch, Feats]
-                elem = window_input[-1, :, :].unsqueeze(0) # [1, Batch, Feats]
                 
-                x1, x2 = self.model(window_input, elem)
+                # O TranAD opera na janela inteira
+                x1, x2 = self.model(window_input, window_input)
                 
-                # Metodologia TranAD: Eq 13 (0.5 * L1 + 0.5 * L2)
-                loss1 = torch.mean((x1 - elem) ** 2, dim=2)
-                loss2 = torch.mean((x2 - elem) ** 2, dim=2)
-                batch_loss = (0.5 * loss1 + 0.5 * loss2).squeeze(0)
+                # Metodologia TranAD: Eq 13 (0.5 * L1 + 0.5 * L2) 
+                # Norma L2 (RMSE no eixo temporal da janela) por feature
+                loss1 = torch.sqrt(torch.mean((x1 - window_input) ** 2, dim=0)) # [Batch, Feats]
+                loss2 = torch.sqrt(torch.mean((x2 - window_input) ** 2, dim=0)) # [Batch, Feats]
+                batch_loss = 0.5 * loss1 + 0.5 * loss2 # [Batch, Feats]
                 
                 scores.extend(batch_loss.cpu().numpy())
                 
@@ -277,7 +280,7 @@ class TranAD:
                 lms *= 0.999
         return s.extreme_quantile
 
-    def fit(self, df_train, epochs=100, batch_size=128, lr=1e-3, patience=20, val_split=0.1, gain=1.0):
+    def fit(self, df_train, epochs=100, batch_size=128, lr=1e-3, patience=20, val_split=0.1, gain=1.0, verbose=False):
         self.gain = gain
         
         # 1. Padroniza a entrada
@@ -333,14 +336,13 @@ class TranAD:
             for (inputs,) in train_loader:
                 inputs = inputs.to(self.device)
                 window = inputs.permute(1, 0, 2)
-                elem = window[-1, :, :].unsqueeze(0)
                 
                 optimizer.zero_grad()
-                z1, z2 = self.model(window, elem)
+                z1, z2 = self.model(window, window)
                 
                 # Perda calculada segundo a formulação original do TranAD
-                loss1 = criterion(z1, elem)
-                loss2 = criterion(z2, elem)
+                loss1 = criterion(z1, window)
+                loss2 = criterion(z2, window)
                 loss = (1 / n) * loss1 + (1 - 1/n) * loss2
                 loss = torch.mean(loss)
                 
@@ -357,11 +359,10 @@ class TranAD:
                 for (inputs,) in val_loader:
                     inputs = inputs.to(self.device)
                     window = inputs.permute(1, 0, 2)
-                    elem = window[-1, :, :].unsqueeze(0)
-                    z1, z2 = self.model(window, elem)
+                    z1, z2 = self.model(window, window)
                     
-                    l1 = criterion(z1, elem)
-                    l2 = criterion(z2, elem)
+                    l1 = criterion(z1, window)
+                    l2 = criterion(z2, window)
                     loss = (1 / n) * l1 + (1 - 1/n) * l2
                     val_loss += torch.mean(loss).item()
             
@@ -372,21 +373,29 @@ class TranAD:
             else:
                 patience_counter += 1
                 
-            if epoch % 5 == 0 or epoch == 1:
+            if (epoch % 5 == 0 or epoch == 1) and verbose:
                 print(f"Epoch [{epoch}/{epochs}] | Train Loss: {avg_train:.6f} | Val Loss: {avg_val:.6f}")
                 
             if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch}. Best Val Loss: {best_val_loss:.6f}")
+                if verbose: print(f"Early stopping at epoch {epoch}. Best Val Loss: {best_val_loss:.6f}")
                 break
                 
         self.model.load_state_dict(best_model_state)
         
         # 6. Cálculo Dinâmico do Threshold com SPOT
-        print("Calculando limiar dinâmico (SPOT)...")
-        train_scores = self._get_anomaly_scores(tensor_data, batch_size=batch_size)
-        base_threshold = self._pot_eval(train_scores)
-        self.threshold = base_threshold * self.gain
-        print(f"Limiar de Anomalia Final (SPOT * Gain): {self.threshold:.6f}")
+        if verbose: print("Calculando limiar dinâmico (SPOT) por variável...")
+        train_scores = self._get_anomaly_scores(tensor_data, batch_size=batch_size) # Shape: [N_windows, Feats]
+        self.thresholds = np.zeros(self.n_features)
+        
+        for i in range(self.n_features):
+            try:
+                base_threshold = self._pot_eval(train_scores[:, i])
+                self.thresholds[i] = base_threshold * self.gain
+            except Exception as e:
+                # Fallback caso o SPOT falhe para uma variável perfeitamente constante
+                self.thresholds[i] = np.percentile(train_scores[:, i], 99) * self.gain
+                
+        if verbose: print(f"Limiares de Anomalia Calculados para {self.n_features} variáveis.")
 
     def predict(self, df_test, timestamps=None, batch_size=128):
         """Inference pipeline for new unseen data."""
@@ -407,6 +416,10 @@ class TranAD:
         tensor_windows = torch.tensor(windows, dtype=torch.float32)
         all_scores = self._get_anomaly_scores(tensor_windows, batch_size=batch_size)
         
+        # Phi é o valor máximo relativo ao threshold da variável
+        relative_scores = all_scores / (self.thresholds + 1e-8)
+        aggregated_phi = np.max(relative_scores, axis=1)
+        
         w = self.seq_len
         s = self.stride
         
@@ -414,8 +427,8 @@ class TranAD:
             ts_values = timestamps.values if hasattr(timestamps, 'values') else np.array(timestamps)
             valid_indices = [i + w - 1 for i in range(0, len(df_test) - w + 1, s)]
             
-            min_len = min(len(all_scores), len(valid_indices))
-            final_scores = all_scores[:min_len]
+            min_len = min(len(aggregated_phi), len(valid_indices))
+            final_scores = aggregated_phi[:min_len]
             final_indices = valid_indices[:min_len]
             
             final_timestamps = [ts_values[idx] for idx in final_indices if idx < len(ts_values)]
@@ -427,8 +440,8 @@ class TranAD:
             }
         else:
             return {
-                'timestamp': np.arange(len(all_scores)).tolist(),
-                'phi': all_scores.tolist()
+                'timestamp': np.arange(len(aggregated_phi)).tolist(),
+                'phi': aggregated_phi.tolist()
             }
 
     def contribution(self, df_anomaly, timestamps=None, df_sistema=None, batch_size=32):
@@ -441,7 +454,8 @@ class TranAD:
             
         loader = DataLoader(TensorDataset(torch.tensor(windows, dtype=torch.float32)), batch_size=batch_size, shuffle=False)
         
-        total_error_val = torch.zeros(self.n_features).to(self.device)
+        total_relative_val = np.zeros(self.n_features)
+        total_excess_val = np.zeros(self.n_features)
         reconstructed_vals_last_step = []
         
         self.model.eval()
@@ -449,29 +463,39 @@ class TranAD:
             for (inputs,) in loader:
                 inputs = inputs.to(self.device)
                 window_input = inputs.permute(1, 0, 2)
-                elem = window_input[-1, :, :].unsqueeze(0)
                 
-                x1, x2 = self.model(window_input, elem)
+                x1, x2 = self.model(window_input, window_input)
                 
-                # Erro por variável (Eq 13 adaptada para extrair erro de feature isolado)
-                batch_error_1 = torch.pow(x1 - elem, 2)
-                batch_error_2 = torch.pow(x2 - elem, 2)
-                batch_error = 0.5 * batch_error_1 + 0.5 * batch_error_2
+                # Erro por variável com norma L2 ao longo da janela
+                batch_error_1 = torch.sqrt(torch.mean((x1 - window_input) ** 2, dim=0)) # [Batch, Feats]
+                batch_error_2 = torch.sqrt(torch.mean((x2 - window_input) ** 2, dim=0)) # [Batch, Feats]
+                batch_error = 0.5 * batch_error_1 + 0.5 * batch_error_2 # [Batch, Feats]
                 
-                # Soma os erros ao longo do batch
-                total_error_val += torch.sum(batch_error.squeeze(0), dim=0)
+                batch_error_np = batch_error.cpu().numpy()
                 
-                # Guarda a reconstrução final da Fase 2 (x2) para o reverse transform
-                reconstructed_vals_last_step.extend(x2.squeeze(0).cpu().numpy())
+                # Cálculo do RCA usando threshold da respectiva feature
+                rel_scores = batch_error_np / (self.thresholds + 1e-8)
+                exc_scores = np.maximum(0, batch_error_np - self.thresholds)
+                
+                total_relative_val += np.sum(rel_scores, axis=0)
+                total_excess_val += np.sum(exc_scores, axis=0)
+                
+                # Guarda a reconstrução final da Fase 2 (x2) apenas para o último ponto da janela
+                reconstructed_vals_last_step.extend(x2[-1, :, :].cpu().numpy())
 
-        # 1. Pipeline de Causa Raiz (MAD)
-        variable_scores = total_error_val.cpu().numpy()
-        total_period_error = np.sum(variable_scores)
-        contrib_pct = (variable_scores / total_period_error * 100) if total_period_error > 0 else np.zeros_like(variable_scores)
+        # 1. Pipeline de Causa Raiz (RCA com SPOT)
+        total_excess_error = np.sum(total_excess_val)
+        
+        if total_excess_error > 0:
+            contrib_pct = (total_excess_val / total_excess_error * 100)
+        else:
+            # Fallback caso a anomalia seja muito sutil
+            total_rel_error = np.sum(total_relative_val)
+            contrib_pct = (total_relative_val / total_rel_error * 100) if total_rel_error > 0 else np.zeros_like(total_relative_val)
 
         df_contrib = pd.DataFrame({
             'VARIAVEL': self.feature_names,
-            'score': variable_scores,
+            'score': total_relative_val,
             '%': contrib_pct
         })
         
@@ -501,15 +525,21 @@ class TranAD:
         # 2. Pipeline de Reconstrução Desnormalizada
         recon_arr = np.array(reconstructed_vals_last_step)
         recon_real = self.scaler.inverse_transform(recon_arr)
-        reconstruction_df = pd.DataFrame(recon_real, columns=self.feature_names)
+        
+        # Cria um DataFrame vazio (NaNs) do mesmo tamanho que a entrada df_anomaly
+        reconstruction_df = pd.DataFrame(np.nan, index=np.arange(len(df_anomaly)), columns=self.feature_names)
+        
+        # Preenche com os valores preditos apenas nos índices correspondentes à saída da janela
+        w = self.seq_len
+        s = self.stride
+        valid_indices = [i + w - 1 for i in range(0, len(df_anomaly) - w + 1, s)]
+        
+        min_len = min(len(recon_real), len(valid_indices))
+        reconstruction_df.iloc[valid_indices[:min_len]] = recon_real[:min_len]
         
         if timestamps is not None:
             ts_values = timestamps.values if hasattr(timestamps, 'values') else np.array(timestamps)
-            valid_timestamps = ts_values[self.seq_len - 1 :: self.stride]
-            min_len = min(len(reconstruction_df), len(valid_timestamps))
-            
-            reconstruction_df = reconstruction_df.iloc[:min_len].copy()
-            reconstruction_df.index = valid_timestamps[:min_len]
+            reconstruction_df.index = ts_values
             reconstruction_df.index.name = 'timestamp'
             reconstruction_df.reset_index(inplace=True)
             
