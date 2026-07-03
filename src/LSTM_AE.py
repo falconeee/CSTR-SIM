@@ -129,29 +129,23 @@ class LSTM_Autoencoder(nn.Module):
         self.n_features = n_features
         self.hidden_dim = hidden_dim
         
-        # --- Encoder ---
-        self.encoder_l1 = nn.LSTM(
+        # --- Encoder (Bidirectional) ---
+        self.encoder = nn.LSTM(
             input_size=n_features, 
-            hidden_size=hidden_dim, 
-            batch_first=True
-        )
-        self.dropout = nn.Dropout(dropout_rate)
-        self.encoder_l2 = nn.LSTM(
-            input_size=hidden_dim, 
             hidden_size=hidden_dim // 2, 
-            batch_first=True
+            num_layers=2,
+            batch_first=True,
+            bidirectional=True,
+            dropout=dropout_rate if dropout_rate > 0 else 0
         )
         
         # --- Decoder ---
-        self.decoder_l1 = nn.LSTM(
-            input_size=hidden_dim // 2, 
-            hidden_size=hidden_dim // 2, 
-            batch_first=True
-        )
-        self.decoder_l2 = nn.LSTM(
-            input_size=hidden_dim // 2,
-            hidden_size=hidden_dim,
-            batch_first=True
+        self.decoder = nn.LSTM(
+            input_size=hidden_dim, 
+            hidden_size=hidden_dim, 
+            num_layers=2,
+            batch_first=True,
+            dropout=dropout_rate if dropout_rate > 0 else 0
         )
         
         # Camada Final (Linear atua em todos os timesteps para regressão exata)
@@ -161,19 +155,29 @@ class LSTM_Autoencoder(nn.Module):
         # x shape: [batch, seq_len, features]
         
         # Encoder Pass
-        x, _ = self.encoder_l1(x)
-        x = self.dropout(x)
+        _, (hidden, cell) = self.encoder(x)
         
-        _, (hidden, cell) = self.encoder_l2(x)
+        # hidden of bidirectional has shape [num_layers * num_directions, batch, hidden_size]
+        # We need to adapt it to the decoder which is unidirectional but expects hidden_dim size.
+        # So we concatenate the forward and backward hidden states.
+        
+        # Combine forward and backward hidden states for each layer
+        # num_layers=2, bidirectional=True -> 4 layers total
+        # layer 1: forward=0, backward=1. layer 2: forward=2, backward=3
+        h_layer1 = torch.cat((hidden[0], hidden[1]), dim=1) # [batch, hidden_dim]
+        h_layer2 = torch.cat((hidden[2], hidden[3]), dim=1) # [batch, hidden_dim]
+        hidden_dec = torch.stack((h_layer1, h_layer2), dim=0) # [2, batch, hidden_dim]
+        
+        c_layer1 = torch.cat((cell[0], cell[1]), dim=1)
+        c_layer2 = torch.cat((cell[2], cell[3]), dim=1)
+        cell_dec = torch.stack((c_layer1, c_layer2), dim=0)
         
         # Repeat Vector: Repete o vetor latente no tempo
-        latent = hidden[-1]
-        decoder_input = latent.unsqueeze(1).repeat(1, self.seq_len, 1) # [batch, seq_len, hidden_dim // 2]
+        latent = hidden_dec[-1] # [batch, hidden_dim]
+        decoder_input = latent.unsqueeze(1).repeat(1, self.seq_len, 1) # [batch, seq_len, hidden_dim]
         
-        # Decoder Pass (passando hidden e cell state para a memória contextual)
-        x, _ = self.decoder_l1(decoder_input, (hidden, cell))
-        x = self.dropout(x)
-        x, _ = self.decoder_l2(x)
+        # Decoder Pass (passando hidden e cell state combinados para a memória contextual)
+        x, _ = self.decoder(decoder_input, (hidden_dec, cell_dec))
         
         # Reconstrução
         reconstruction = self.output_layer(x) # [batch, seq_len, features]
@@ -239,7 +243,7 @@ class LSTM_AE:
                 lms *= 0.999 # Diminui o rigor se falhar ao ajustar a curva de Pareto
         return s.extreme_quantile
 
-    def fit(self, df_train, epochs=100, batch_size=128, lr=1e-3, patience=20, val_split=0.1, gain=1.0):
+    def fit(self, df_train, epochs=100, batch_size=128, lr=1e-3, patience=20, val_split=0.1, gain=1.0, verbose=True):
         self.gain = gain
         
         # 1. Padroniza a entrada para ser sempre uma lista
@@ -287,7 +291,7 @@ class LSTM_AE:
         patience_counter = 0
         best_model_state = None
 
-        print(f"Treinando LSTM-AE no dispositivo: {self.device}...")
+        if verbose: print(f"Treinando LSTM-AE no dispositivo: {self.device}...")
         for epoch in range(1, epochs + 1):
             self.model.train()
             train_loss = 0
@@ -316,23 +320,23 @@ class LSTM_AE:
             else:
                 patience_counter += 1
                 
-            if epoch % 10 == 0 or epoch == 1:
+            if verbose and (epoch % 10 == 0 or epoch == 1):
                 print(f"Epoch [{epoch}/{epochs}] | Train Loss: {avg_train:.6f} | Val Loss: {avg_val:.6f}")
                 
             if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch}. Best Val Loss: {best_val_loss:.6f}")
+                if verbose: print(f"Early stopping at epoch {epoch}. Best Val Loss: {best_val_loss:.6f}")
                 break
                 
         self.model.load_state_dict(best_model_state)
         
         # Cálculo Dinâmico do Threshold com SPOT
-        print("Calculando limiar dinâmico (SPOT)...")
+        if verbose: print("Calculando limiar dinâmico (SPOT)...")
         train_scores = self._get_anomaly_scores(tensor_data)
         base_threshold = self._pot_eval(train_scores)
         self.threshold = base_threshold * self.gain
-        print(f"Limiar de Anomalia Final (SPOT * Gain): {self.threshold:.6f}")
+        if verbose: print(f"Limiar de Anomalia Final (SPOT * Gain): {self.threshold:.6f}")
 
-        print("Calculando perfil de erro baseline por variável...")
+        if verbose: print("Calculando perfil de erro baseline por variável...")
         self.baseline_errors = self._get_baseline_feature_errors(tensor_data)
 
     def _get_baseline_feature_errors(self, data_tensor, batch_size=128):
@@ -402,15 +406,15 @@ class LSTM_AE:
             
             return {
                 'timestamp': final_timestamps,
-                'phi': final_scores.tolist()
+                'phi': final_scores
             }
         else:
             return {
-                'timestamp': np.arange(len(all_scores)).tolist(),
-                'phi': all_scores.tolist()
+                'timestamp': np.arange(len(all_scores)),
+                'phi': all_scores
             }
 
-    def contribution(self, df_anomaly, timestamps=None, df_sistema=None, batch_size=32):
+    def contribution(self, df_anomaly, df_sistema, timestamps=None, batch_size=32, top_k=None, **kwargs):
         """
         Análise de Causa Raiz: Calcula o erro de reconstrução individual por variável usando
         o Aumento Relativo do erro de reconstrução isolando o sensor culpado da anomalia.
@@ -480,7 +484,7 @@ class LSTM_AE:
         if df_contrib_filtered['score'].sum() > 0:
             df_contrib_filtered['%'] = (df_contrib_filtered['score'] / df_contrib_filtered['score'].sum()) * 100
         
-        contributions_dict = df_contrib_filtered[['VARIAVEL', 'DESC', 'SISTEMA', 'score', '%']].to_dict()
+        contributions_dict = df_contrib_filtered[['VARIAVEL', 'DESC', 'SISTEMA', 'score', 'peak_z', '%']].to_dict()
 
         # 2. Pipeline de Reconstrução Desnormalizada
         recon_arr = np.array(reconstructed_vals_last_step)
@@ -497,5 +501,13 @@ class LSTM_AE:
             reconstruction_df.index = valid_timestamps[:min_len]
             reconstruction_df.index.name = 'timestamp'
             reconstruction_df.reset_index(inplace=True)
+            
+        if top_k is not None:
+            
+            selected_vars = df_contrib_filtered['VARIAVEL'].tolist()
+            
+            keep_cols = (['timestamp'] if 'timestamp' in reconstruction_df.columns else []) + selected_vars
+            
+            reconstruction_df = reconstruction_df[keep_cols].copy()
             
         return contributions_dict, reconstruction_df

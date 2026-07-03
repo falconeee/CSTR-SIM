@@ -122,26 +122,30 @@ class AE_Model(nn.Module):
         self.n_features = n_features
         self.input_dim = seq_len * n_features
         
+        # Dynamic hidden dimensions to prevent extreme bottlenecks
+        h1 = max(256, self.input_dim // 2)
+        h2 = max(128, self.input_dim // 4)
+        
         self.encoder = nn.Sequential(
-            nn.Linear(self.input_dim, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(self.input_dim, h1),
+            nn.BatchNorm1d(h1),
             nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
+            nn.Linear(h1, h2),
+            nn.BatchNorm1d(h2),
             nn.GELU(),
-            nn.Linear(64, latent_dim)
+            nn.Linear(h2, latent_dim)
         )
         
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, 64),
-            nn.BatchNorm1d(64),
+            nn.Linear(latent_dim, h2),
+            nn.BatchNorm1d(h2),
             nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(64, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(h2, h1),
+            nn.BatchNorm1d(h1),
             nn.GELU(),
-            nn.Linear(128, self.input_dim)
+            nn.Linear(h1, self.input_dim)
         )
 
     def forward(self, x):
@@ -208,7 +212,7 @@ class ANN_AE:
                 lms *= 0.999 # Diminui o rigor se falhar ao ajustar a curva de Pareto
         return s.extreme_quantile
 
-    def fit(self, df_train, epochs=100, batch_size=128, lr=1e-3, patience=20, val_split=0.1, gain=1.0, train_stride=None):
+    def fit(self, df_train, epochs=100, batch_size=128, lr=1e-3, patience=20, val_split=0.1, gain=1.0, train_stride=None, verbose=True):
         self.gain = gain
         
         # Se não definido, usa metade da janela para reduzir sobreposição e tempo de treino
@@ -287,17 +291,17 @@ class ANN_AE:
             else:
                 patience_counter += 1
                 
-            if epoch % 10 == 0 or epoch == 1:
+            if verbose and (epoch % 10 == 0 or epoch == 1):
                 print(f"Epoch [{epoch}/{epochs}] | Train Loss: {avg_train:.6f} | Val Loss: {avg_val:.6f}")
                 
             if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch}. Best Val Loss: {best_val_loss:.6f}")
+                if verbose: print(f"Early stopping at epoch {epoch}. Best Val Loss: {best_val_loss:.6f}")
                 break
                 
         self.model.load_state_dict(best_model_state)
         
         # Cálculo do Baseline de Erro por Variável para Análise de Causa Raiz
-        print("Calculando baseline de reconstrução por variável...")
+        if verbose: print("Calculando baseline de reconstrução por variável...")
         self.model.eval()
         with torch.no_grad():
             all_recon = []
@@ -320,11 +324,11 @@ class ANN_AE:
             self.train_error_std[self.train_error_std == 0] = 1e-8
         
         # Cálculo Dinâmico do Threshold com SPOT
-        print("Calculando limiar dinâmico (SPOT)...")
+        if verbose: print("Calculando limiar dinâmico (SPOT)...")
         train_scores = self._get_anomaly_scores(tensor_data)
         base_threshold = self._pot_eval(train_scores)
         self.threshold = base_threshold * self.gain
-        print(f"Limiar de Anomalia Final (SPOT * Gain): {self.threshold:.6f}")
+        if verbose: print(f"Limiar de Anomalia Final (SPOT * Gain): {self.threshold:.6f}")
 
     def predict(self, df_test, timestamps=None, batch_size=128):
         """
@@ -381,16 +385,16 @@ class ANN_AE:
             
             return {
                 'timestamp': final_timestamps,
-                'phi': final_scores.tolist()
+                'phi': final_scores
             }
         else:
             # Timestamps fictícios caso nenhum seja fornecido
             return {
-                'timestamp': np.arange(len(all_scores)).tolist(),
-                'phi': all_scores.tolist()
+                'timestamp': np.arange(len(all_scores)),
+                'phi': all_scores
             }
 
-    def contribution(self, df_anomaly, timestamps=None, df_sistema=None, batch_size=32):
+    def contribution(self, df_anomaly, df_sistema, timestamps=None, batch_size=32, top_k=None, **kwargs):
         """
         Análise de Causa Raiz: Calcula o erro de reconstrução individual por variável (MAE) e
         aplica Z-Score histórico para identificar exatamente os sensores que mais desviaram do normal.
@@ -447,17 +451,27 @@ class ANN_AE:
             
         df_contrib = df_contrib.sort_values(by='score', ascending=False).reset_index(drop=True)
 
-        # Filtro: Isolamos variáveis com Z-score > 2 (mais de 2 desvios padrões fora do normal)
-        df_contrib_filtered = df_contrib[df_contrib['score'] > 2.0].copy()
-        
-        # Fallback: Se nenhuma variável superar o threshold estatístico, mostra as top 3
-        if len(df_contrib_filtered) == 0:
-            df_contrib_filtered = df_contrib.head(3).copy()
+        if 'peak_z' not in df_contrib.columns:
+
+            df_contrib['peak_z'] = df_contrib['score']
+
+        if top_k is not None:
+
+            df_contrib_filtered = df_contrib.head(int(top_k)).copy()
+
+        else:
+
+            df_contrib_filtered = df_contrib[df_contrib['score'] > 2.0].copy()
+
+            if len(df_contrib_filtered) == 0:
+
+                df_contrib_filtered = df_contrib.head(3).copy()
 
         if df_contrib_filtered['score'].sum() > 0:
+
             df_contrib_filtered['%'] = (df_contrib_filtered['score'] / df_contrib_filtered['score'].sum()) * 100
         
-        contributions_dict = df_contrib_filtered[['VARIAVEL', 'DESC', 'SISTEMA', 'score', '%']].to_dict()
+        contributions_dict = df_contrib_filtered[['VARIAVEL', 'DESC', 'SISTEMA', 'score', 'peak_z', '%']].to_dict()
 
         # 2. Pipeline de Reconstrução Desnormalizada
         recon_arr = np.array(reconstructed_vals_last_step)
@@ -476,5 +490,13 @@ class ANN_AE:
             reconstruction_df.index = valid_timestamps[:min_len]
             reconstruction_df.index.name = 'timestamp'
             reconstruction_df.reset_index(inplace=True)
+            
+        if top_k is not None:
+            
+            selected_vars = df_contrib_filtered['VARIAVEL'].tolist()
+            
+            keep_cols = (['timestamp'] if 'timestamp' in reconstruction_df.columns else []) + selected_vars
+            
+            reconstruction_df = reconstruction_df[keep_cols].copy()
             
         return contributions_dict, reconstruction_df

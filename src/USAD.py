@@ -428,7 +428,7 @@ class USAD:
                 'phi': all_scores
             }
 
-    def contribution(self, df_test, df_sistema, timestamps=None, batch_size=32):
+    def contribution(self, df_test, df_sistema, timestamps=None, batch_size=32, top_k=None, **kwargs):
         """
         Root Cause Analysis (RCA) pipeline para o USAD.
         Identifica os sensores que causaram a anomalia e retorna a projeção (reconstrução).
@@ -580,5 +580,13 @@ class USAD:
             reconstruction_df.index = aligned_timestamps
             reconstruction_df.index.name = 'timestamp'
             reconstruction_df.reset_index(inplace=True)
+        
+        if top_k is not None:
+        
+            selected_vars = df_contrib_filtered['VARIAVEL'].tolist()
+        
+            keep_cols = (['timestamp'] if 'timestamp' in reconstruction_df.columns else []) + selected_vars
+        
+            reconstruction_df = reconstruction_df[keep_cols].copy()
         
         return contributions_dict, reconstruction_df

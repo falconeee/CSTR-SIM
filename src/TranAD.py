@@ -436,15 +436,15 @@ class TranAD:
             
             return {
                 'timestamp': final_timestamps,
-                'phi': final_scores.tolist()
+                'phi': final_scores
             }
         else:
             return {
-                'timestamp': np.arange(len(aggregated_phi)).tolist(),
-                'phi': aggregated_phi.tolist()
+                'timestamp': np.arange(len(aggregated_phi)),
+                'phi': aggregated_phi
             }
 
-    def contribution(self, df_anomaly, timestamps=None, df_sistema=None, batch_size=32):
+    def contribution(self, df_anomaly, df_sistema, timestamps=None, batch_size=32, top_k=None, **kwargs):
         """Análise de Causa Raiz usando as características do TranAD."""
         if self.model is None: raise ValueError("Execute .fit() primeiro.")
         
@@ -520,7 +520,7 @@ class TranAD:
         if df_contrib_filtered['score'].sum() > 0:
             df_contrib_filtered['%'] = (df_contrib_filtered['score'] / df_contrib_filtered['score'].sum()) * 100
         
-        contributions_dict = df_contrib_filtered[['VARIAVEL', 'DESC', 'SISTEMA', 'score', '%']].to_dict()
+        contributions_dict = df_contrib_filtered[['VARIAVEL', 'DESC', 'SISTEMA', 'score', 'peak_z', '%']].to_dict()
 
         # 2. Pipeline de Reconstrução Desnormalizada
         recon_arr = np.array(reconstructed_vals_last_step)
@@ -542,5 +542,13 @@ class TranAD:
             reconstruction_df.index = ts_values
             reconstruction_df.index.name = 'timestamp'
             reconstruction_df.reset_index(inplace=True)
+            
+        if top_k is not None:
+            
+            selected_vars = df_contrib_filtered['VARIAVEL'].tolist()
+            
+            keep_cols = (['timestamp'] if 'timestamp' in reconstruction_df.columns else []) + selected_vars
+            
+            reconstruction_df = reconstruction_df[keep_cols].copy()
             
         return contributions_dict, reconstruction_df

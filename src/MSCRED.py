@@ -635,7 +635,8 @@ class MSCRED:
             'phi': final_scores[:min_len]
         }
 
-    def contribution(self, df_test, df_sistema, anomaly_timestamps, batch_size=32, alpha=1.0):
+    def contribution(self, df_test, df_sistema, timestamps=None, batch_size=32, top_k=None, alpha=1.0, **kwargs):
+        anomaly_timestamps = timestamps
         """
         Root Cause Analysis (RCA) for Hybrid MSCRED.
         Calculates contributions only for the specific anomalous timestamps.
@@ -738,19 +739,25 @@ class MSCRED:
         
         df_contrib = df_contrib.sort_values(by='score', ascending=False).reset_index(drop=True)
 
+        if 'peak_z' not in df_contrib.columns:
+            df_contrib['peak_z'] = df_contrib['score']
+
         # Dynamic Outlier Identification (MAD Approach)
         df_contrib_backup = df_contrib.copy()
         
-        median_score = df_contrib['score'].median()
-        mad = (df_contrib['score'] - median_score).abs().median()
-        
-        k = 1.4826
-        mad_threshold = median_score + (k * mad)
-        
-        df_contrib = df_contrib[df_contrib['score'] > mad_threshold].copy()
-        
-        if len(df_contrib) == 0:
-            df_contrib = df_contrib_backup.head(3).copy()
+        if top_k is not None:
+            df_contrib = df_contrib.head(int(top_k)).copy()
+        else:
+            median_score = df_contrib['score'].median()
+            mad = (df_contrib['score'] - median_score).abs().median()
+            
+            k = 1.4826
+            mad_threshold = median_score + (k * mad)
+            
+            df_contrib = df_contrib[df_contrib['score'] > mad_threshold].copy()
+            
+            if len(df_contrib) == 0:
+                df_contrib = df_contrib_backup.head(3).copy()
 
         if df_contrib['score'].sum() > 0:
             df_contrib['%'] = (df_contrib['score'] / df_contrib['score'].sum()) * 100
@@ -759,7 +766,7 @@ class MSCRED:
 
         df_contrib.index = df_contrib.index.astype(str)
         
-        final_cols = ['VARIAVEL', 'DESC', 'score', '%']
+        final_cols = ['VARIAVEL', 'DESC', 'score', 'peak_z', '%']
         if 'SISTEMA' in df_contrib.columns: final_cols.insert(2, 'SISTEMA')
         
         df_contrib = df_contrib[final_cols]
@@ -780,4 +787,9 @@ class MSCRED:
         df_reconstruction.index.name = 'timestamp'
         df_reconstruction.reset_index(inplace=True)
             
+        if top_k is not None:
+            selected_vars = df_contrib['VARIAVEL'].tolist()
+            keep_cols = (['timestamp'] if 'timestamp' in df_reconstruction.columns else []) + selected_vars
+            df_reconstruction = df_reconstruction[keep_cols].copy()
+
         return contributions_dict, df_reconstruction

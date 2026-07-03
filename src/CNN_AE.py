@@ -135,48 +135,35 @@ class OptimizedCNN_Autoencoder(nn.Module):
         self.n_features = n_features
 
         # --- ENCODER ---
+        # Utiliza padding para manter seq_len intacto (apenas compressão no canal)
         self.encoder = nn.Sequential(
-            nn.Conv1d(in_channels=n_features, out_channels=64, kernel_size=15, stride=3, padding=7),
+            nn.Conv1d(in_channels=n_features, out_channels=64, kernel_size=7, stride=1, padding=3),
             nn.BatchNorm1d(64),
             nn.GELU(),
             nn.Dropout(dropout_rate),
             
-            nn.Conv1d(64, 32, kernel_size=9, stride=2, padding=4),
+            nn.Conv1d(64, 32, kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(32),
             nn.GELU(),
             
-            nn.Conv1d(32, 16, kernel_size=7, stride=2, padding=3),
+            nn.Conv1d(32, 16, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm1d(16),
-            nn.GELU(),
-            
-            nn.Conv1d(16, 8, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm1d(8),
-            nn.GELU(),
-            
-            nn.MaxPool1d(kernel_size=2, stride=2)
+            nn.GELU()
         )
 
         # --- DECODER ---
         self.decoder = nn.Sequential(
-            nn.ConvTranspose1d(8, 16, kernel_size=3, stride=2, padding=0, output_padding=0),
-            nn.BatchNorm1d(16),
+            nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(32),
             nn.GELU(),
             nn.Dropout(dropout_rate),
             
-            nn.ConvTranspose1d(16, 32, kernel_size=7, stride=2, padding=3, output_padding=1),
-            nn.BatchNorm1d(32),
-            nn.GELU(),
-            
-            nn.ConvTranspose1d(32, 64, kernel_size=9, stride=2, padding=4, output_padding=1),
-            nn.BatchNorm1d(64),
-            nn.GELU(),
-            
-            nn.ConvTranspose1d(64, 64, kernel_size=15, stride=3, padding=7, output_padding=2),
+            nn.Conv1d(32, 64, kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(64),
             nn.GELU(),
             
             # Camada Final: Reconstrói as features originais
-            nn.Conv1d(64, n_features, kernel_size=1, stride=1)
+            nn.Conv1d(64, n_features, kernel_size=7, stride=1, padding=3)
         )
 
     def forward(self, x):
@@ -253,7 +240,7 @@ class CNN_AE:
                 lms *= 0.999 # Diminui o rigor se falhar ao ajustar a curva de Pareto
         return s.extreme_quantile
 
-    def fit(self, df_train, epochs=100, batch_size=128, lr=1e-3, patience=20, val_split=0.1, gain=1.0):
+    def fit(self, df_train, epochs=100, batch_size=128, lr=1e-3, patience=20, val_split=0.1, gain=1.0, verbose=True):
         self.gain = gain
         
         # Padroniza a entrada para ser sempre uma lista
@@ -299,7 +286,7 @@ class CNN_AE:
         patience_counter = 0
         best_model_state = None
 
-        print(f"Treinando CNN-AE no dispositivo: {self.device}...")
+        if verbose: print(f"Treinando CNN-AE no dispositivo: {self.device}...")
         for epoch in range(1, epochs + 1):
             self.model.train()
             train_loss = 0
@@ -328,21 +315,21 @@ class CNN_AE:
             else:
                 patience_counter += 1
                 
-            if epoch % 10 == 0 or epoch == 1:
+            if verbose and (epoch % 10 == 0 or epoch == 1):
                 print(f"Epoch [{epoch}/{epochs}] | Train Loss: {avg_train:.6f} | Val Loss: {avg_val:.6f}")
                 
             if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch}. Best Val Loss: {best_val_loss:.6f}")
+                if verbose: print(f"Early stopping at epoch {epoch}. Best Val Loss: {best_val_loss:.6f}")
                 break
                 
         self.model.load_state_dict(best_model_state)
         
         # Cálculo Dinâmico do Threshold com SPOT
-        print("Calculando limiar dinâmico (SPOT)...")
+        if verbose: print("Calculando limiar dinâmico (SPOT)...")
         train_scores = self._get_anomaly_scores(tensor_data)
         base_threshold = self._pot_eval(train_scores)
         self.threshold = base_threshold * self.gain
-        print(f"Limiar de Anomalia Final (SPOT * Gain): {self.threshold:.6f}")
+        if verbose: print(f"Limiar de Anomalia Final (SPOT * Gain): {self.threshold:.6f}")
 
     def predict(self, df_test, timestamps=None, batch_size=128):
         """
@@ -390,15 +377,15 @@ class CNN_AE:
             
             return {
                 'timestamp': final_timestamps,
-                'phi': final_scores.tolist()
+                'phi': final_scores
             }
         else:
             return {
-                'timestamp': np.arange(len(all_scores)).tolist(),
-                'phi': all_scores.tolist()
+                'timestamp': np.arange(len(all_scores)),
+                'phi': all_scores
             }
 
-    def contribution(self, df_anomaly, timestamps=None, df_sistema=None, batch_size=32):
+    def contribution(self, df_anomaly, df_sistema, timestamps=None, batch_size=32, top_k=None, **kwargs):
         """
         Análise de Causa Raiz com Explainable AI (Captum/Integrated Gradients):
         Calcula qual variável na entrada mais contribuiu para elevar o Anomaly Score final.
@@ -483,7 +470,7 @@ class CNN_AE:
         if df_contrib_filtered['score'].sum() > 0:
             df_contrib_filtered['%'] = (df_contrib_filtered['score'] / df_contrib_filtered['score'].sum()) * 100
         
-        contributions_dict = df_contrib_filtered[['VARIAVEL', 'DESC', 'SISTEMA', 'score', '%']].to_dict()
+        contributions_dict = df_contrib_filtered[['VARIAVEL', 'DESC', 'SISTEMA', 'score', 'peak_z', '%']].to_dict()
 
         # 2. Pipeline de Reconstrução Desnormalizada para output visual
         recon_arr = np.array(reconstructed_vals_last_step)
@@ -500,5 +487,13 @@ class CNN_AE:
             reconstruction_df.index = valid_timestamps[:min_len]
             reconstruction_df.index.name = 'timestamp'
             reconstruction_df.reset_index(inplace=True)
+            
+        if top_k is not None:
+            
+            selected_vars = df_contrib_filtered['VARIAVEL'].tolist()
+            
+            keep_cols = (['timestamp'] if 'timestamp' in reconstruction_df.columns else []) + selected_vars
+            
+            reconstruction_df = reconstruction_df[keep_cols].copy()
             
         return contributions_dict, reconstruction_df

@@ -453,15 +453,15 @@ class OmniAnomaly:
             
             return {
                 'timestamp': final_timestamps,
-                'phi': final_scores.tolist() if isinstance(final_scores, np.ndarray) else final_scores
+                'phi': final_scores if isinstance(final_scores, np.ndarray) else final_scores
             }
         else:
             return {
-                'timestamp': np.arange(len(all_scores)).tolist(), # Timestamps fictícios caso nenhum seja fornecido
-                'phi': all_scores.tolist() if isinstance(all_scores, np.ndarray) else all_scores
+                'timestamp': np.arange(len(all_scores)), # Timestamps fictícios caso nenhum seja fornecido
+                'phi': all_scores if isinstance(all_scores, np.ndarray) else all_scores
             }
 
-    def contribution(self, df_anomaly, timestamps=None, df_sistema=None, batch_size=32):
+    def contribution(self, df_anomaly, df_sistema, timestamps=None, batch_size=32, top_k=None, **kwargs):
         """
         Análise de Causa Raiz baseada na Log-Likelihood Negativa por feature.
         """
@@ -543,5 +543,13 @@ class OmniAnomaly:
             reconstruction_df.index = valid_timestamps[:min_len]
             reconstruction_df.index.name = 'timestamp'
             reconstruction_df.reset_index(inplace=True)
+            
+        if top_k is not None:
+            
+            selected_vars = df_contrib_filtered['VARIAVEL'].tolist()
+            
+            keep_cols = (['timestamp'] if 'timestamp' in reconstruction_df.columns else []) + selected_vars
+            
+            reconstruction_df = reconstruction_df[keep_cols].copy()
             
         return contributions_dict, reconstruction_df
