@@ -95,7 +95,7 @@ def compute_metrics(true_labels, pred_labels, nome_base, dataset):
 
 def run_experiment(dataset):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    main_output_dir = f"output/{dataset}_{timestamp}/{dataset}"
+    main_output_dir = f"output/{dataset}_{timestamp}"
     os.makedirs(main_output_dir, exist_ok=True)
     
     metrics_list = []
