@@ -188,6 +188,7 @@ def run_experiment(dataset, gain, epochs):
     print(f"Processamento concluído. Resultados salvos em {main_output_dir}")
     print(f"Métricas salvas em: {metrics_path}")
 
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run anomaly detection on CSTR or TE dataset.')
     parser.add_argument('--dataset', type=str, choices=['CSTR', 'TE'], required=True, help='Dataset to use (CSTR or TE)')
     parser.add_argument('--gain', type=float, default=None, help='Threshold gain multiplier')
