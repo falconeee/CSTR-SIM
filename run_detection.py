@@ -93,7 +93,7 @@ def compute_metrics(true_labels, pred_labels, nome_base, dataset):
         "tp": int(tp), "tn": int(tn), "fp": int(fp), "fn": int(fn)
     }
 
-def run_experiment(dataset):
+def run_experiment(dataset, gain, epochs):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     main_output_dir = f"output/{dataset}_{timestamp}"
     os.makedirs(main_output_dir, exist_ok=True)
@@ -107,8 +107,8 @@ def run_experiment(dataset):
         if "CLASS" in df_normal.columns:
             df_normal = df_normal.drop(columns=["CLASS"])
             
-        print("Training MSCVAE on CSTR normal data...")
-        mscvae.fit([df_normal], gain=0.7, epochs=50, verbose=True)
+        print(f"Training MSCVAE on CSTR normal data with gain {gain} for {epochs} epochs...")
+        mscvae.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
         
         df_sistema = pd.read_csv(os.path.join(dir_data, "CSTR_subsistema.csv"), sep=";")
         fault_files = glob.glob(os.path.join(dir_data, "falha*.csv"))
@@ -141,8 +141,8 @@ def run_experiment(dataset):
         data_normal = sio.loadmat(os.path.join(dir_data, "fault_00.mat"))
         df_normal = pd.DataFrame(data_normal["trainingdata"])
         
-        print("Training MSCVAE on TE normal data...")
-        mscvae.fit([df_normal], gain=1, epochs=100, verbose=True)
+        print(f"Training MSCVAE on TE normal data with gain {gain} for {epochs} epochs...")
+        mscvae.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
         
         df_sistema = pd.DataFrame({
             "VARIAVEL": list(range(52)),
@@ -188,9 +188,13 @@ def run_experiment(dataset):
     print(f"Processamento concluído. Resultados salvos em {main_output_dir}")
     print(f"Métricas salvas em: {metrics_path}")
 
-if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run anomaly detection on CSTR or TE dataset.')
     parser.add_argument('--dataset', type=str, choices=['CSTR', 'TE'], required=True, help='Dataset to use (CSTR or TE)')
+    parser.add_argument('--gain', type=float, default=None, help='Threshold gain multiplier')
+    parser.add_argument('--epochs', type=int, default=None, help='Number of training epochs')
     args = parser.parse_args()
     
-    run_experiment(args.dataset)
+    gain = args.gain if args.gain is not None else (0.7 if args.dataset == 'CSTR' else 1.0)
+    epochs = args.epochs if args.epochs is not None else (50 if args.dataset == 'CSTR' else 100)
+    
+    run_experiment(args.dataset, gain, epochs)

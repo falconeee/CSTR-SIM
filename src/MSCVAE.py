@@ -194,13 +194,15 @@ class MSCVAE_Hybrid(nn.Module):
        A 4D tensor (B, n_scales, N, N) is accepted as a degenerate sequence of length 1.
        The matrix that is reconstructed / scored is always the LAST timestep (x[:, -1]).
     """
-    def __init__(self, n_features, n_scales=1):
+    def __init__(self, n_features, n_scales=1, latent_dim=None):
         super(MSCVAE_Hybrid, self).__init__()
         self.n_features = n_features
         # Number of multi-scale attribute matrices stacked as input/output channels.
         self.n_scales = n_scales
-        # Latent dimension scaled by the square root of features to prevent over-compression
-        latent_dim = round(math.sqrt(n_features))
+        if latent_dim is not None:
+            latent_dim = latent_dim
+        else:
+            latent_dim = max(16, n_features // 2)
 
         # Encoder: Extracts hierarchical spatial features from the (multi-scale) matrices
         self.enc1 = nn.Conv2d(n_scales, 16, 3, 2, 1)
@@ -567,8 +569,9 @@ class MSCVAE:
     data preprocessing (matrix generation), model training, dynamic threshold
     calculation (SPOT), and root cause analysis (contribution).
     """
-    def __init__(self, n_features=None, window_sizes=None, window_size=None, stride=1,
+    def __init__(self, n_features=None, latent_dim=None, window_sizes=None, window_size=None, stride=1,
                  seq_len=5, device=None, seed=42):
+        self.latent_dim = latent_dim
         self.seed = seed
         # Enforce reproducibility right at initialization
         self.set_deterministic(self.seed)
@@ -710,7 +713,8 @@ class MSCVAE:
 
         # Initialize Model
         self.model = MSCVAE_Hybrid(
-            n_features=self.n_features, n_scales=len(self.generator.window_sizes)
+            n_features=self.n_features, n_scales=len(self.generator.window_sizes),
+            latent_dim=self.latent_dim
         ).to(self.device)
         # Adam optimizer is used due to its adaptive learning rate, which is highly
         # effective for training the distinct components of a Hybrid VAE simultaneously.

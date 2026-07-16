@@ -25,14 +25,19 @@ pip install pandas numpy scipy plotly scikit-learn kaleido
 ```
 
 ### 2. Executando as Detecções
-O arquivo `run_detection.py` automatiza todo o processo (treinamento e testes em lote). Ele exige que você passe o parâmetro `--dataset` para escolher qual base de dados utilizar: **CSTR** ou **TE**.
+O arquivo `run_detection.py` automatiza todo o processo (treinamento e testes em lote). O único parâmetro obrigatório é `--dataset` (**CSTR** ou **TE**). Você também pode controlar a calibração do modelo e o treinamento diretamente via linha de comando.
+
+**Parâmetros disponíveis:**
+* `--dataset`: Qual base utilizar (`CSTR` ou `TE`). **Obrigatório**.
+* `--gain`: Multiplicador de sensibilidade do limiar de alerta. Valores maiores reduzem alarmes falsos (menos sensível), valores menores aumentam a sensibilidade para anomalias sutis. Padrão: `0.7` para CSTR, `1.0` para TE.
+* `--epochs`: Número de épocas no treinamento. Padrão: `50` para CSTR, `100` para TE.
 
 ```bash
-# Executar a detecção para a base CSTR
+# Executar com os valores padrão para a base CSTR
 python run_detection.py --dataset CSTR
 
-# Executar a detecção para a base TE (Tennessee Eastman)
-python run_detection.py --dataset TE
+# Executar a detecção para a base TE customizando as épocas e o ganho do limiar
+python run_detection.py --dataset TE --gain 1.2 --epochs 120
 ```
 
 ### 3. Entendendo a Saída
