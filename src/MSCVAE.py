@@ -62,18 +62,22 @@ class AttributeMatrixGenerator:
         # NaNs become 0 (which is the mean after scaling), preserving matrix stability
         values = np.nan_to_num(data.values)
 
+        # Pad the beginning to allow windows for the initial elements
+        pad_size = self.w - 1
+        if len(values) > 0 and pad_size > 0:
+            padding = np.tile(values[0], (pad_size, 1))
+            values = np.vstack([padding, values])
+
         matrices = []
         target_values = []
 
         if len(values) < self.w:
-            # Return empty tuple if df is too small (i.e. smaller than the largest window)
             return torch.empty(0), torch.empty(0)
 
         values_t = torch.tensor(values, dtype=torch.float32)
 
-        # Sliding window extraction. The window END is driven by the LARGEST scale so every
-        # scale has full history; smaller scales simply read their own (shorter) tail.
-        for t in range(self.w, len(values), self.step):
+        # Sliding window extraction.
+        for t in range(self.w, len(values) + 1, self.step):
             scale_mats = []
             for w_s in self.window_sizes:
                 x_segment = values_t[t - w_s:t]                  # (w_s, n_features)
@@ -966,9 +970,9 @@ class MSCVAE:
             else:
                 ts_values = np.array(timestamps)
 
-            # 'valid_indices' mimics the loop in the generator to find which timestamps
-            # correspond to the end of each generated matrix.
-            valid_indices = range(w, len(df_test) + 1, s)
+            # valid_indices map the generated sequences back to their original timestamps.
+            # Since we padded the beginning, the first output corresponds to the first original element.
+            valid_indices = range(0, len(df_test), s)
 
             # Truncate to the smallest length to prevent IndexError in case of minor dimension mismatches
             min_len = min(len(all_scores), len(valid_indices))
@@ -1038,7 +1042,7 @@ class MSCVAE:
             s = self.generator.step
             ts_values = timestamps.values if hasattr(timestamps, 'values') else np.array(timestamps)
 
-            valid_indices = [t - 1 for t in range(w, len(df_test) + 1, s)]
+            valid_indices = list(range(0, len(df_test), s))
             min_len = min(len(reconstruction_df), len(valid_indices))
             reconstruction_df = reconstruction_df.iloc[:min_len].copy()
             valid_indices = valid_indices[:min_len]
