@@ -95,7 +95,7 @@ class PCA:
         P = self.pca.components_.T
         C = P @ P.T
         Ctil = np.eye(C.shape[0]) - C
-        cii = np.diag(Ctil)
+        cii = np.diag(Ctil).copy()
         
         # Avoid division by zero
         cii[cii == 0] = 1e-10

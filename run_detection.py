@@ -12,6 +12,13 @@ from sklearn.metrics import f1_score, precision_score, recall_score, confusion_m
 
 from src.MSCVAE import MSCVAE
 from src.PCA import PCA
+from src.ANN_AE import ANN_AE
+from src.CNN_AE import CNN_AE
+from src.LSTM_AE import LSTM_AE
+from src.MSCRED import MSCRED
+from src.OmniAnomaly import OmniAnomaly
+from src.TranAD import TranAD
+from src.USAD import USAD
 
 def plot_predict(predictions, threshold, save_path):
     df = pd.DataFrame({
@@ -43,14 +50,19 @@ def plot_predict(predictions, threshold, save_path):
     )
     fig.write_image(save_path, scale=2)
 
-def plot_reconstruction(df_original, df_reconstruction, vars_to_plot, save_path):
-    num_vars = len(vars_to_plot)
+def plot_reconstruction(df_original, df_reconstruction, df_contribution, save_path):
+    num_vars = len(df_contribution)
     if num_vars == 0:
         return
         
+    vars_to_plot = list(df_contribution['VARIAVEL'])
+    percentages = list(df_contribution['%'])
+    
+    subplot_titles = [f"{pct:.1f}% - Variável {var}" for var, pct in zip(vars_to_plot, percentages)]
+    
     fig = make_subplots(
         rows=num_vars, cols=1, shared_xaxes=True, vertical_spacing=0.05,
-        subplot_titles=[f"Variável: {var}" for var in vars_to_plot]
+        subplot_titles=subplot_titles
     )
     
     for i, var in enumerate(vars_to_plot):
@@ -104,6 +116,20 @@ def run_experiment(dataset, gain, epochs, model_name):
         model = MSCVAE()
     elif model_name == "PCA":
         model = PCA()
+    elif model_name == "ANN_AE":
+        model = ANN_AE()
+    elif model_name == "CNN_AE":
+        model = CNN_AE()
+    elif model_name == "LSTM_AE":
+        model = LSTM_AE()
+    elif model_name == "MSCRED":
+        model = MSCRED()
+    elif model_name == "OmniAnomaly":
+        model = OmniAnomaly()
+    elif model_name == "TranAD":
+        model = TranAD()
+    elif model_name == "USAD":
+        model = USAD()
     else:
         raise ValueError(f"Model {model_name} not supported.")
     
@@ -139,8 +165,7 @@ def run_experiment(dataset, gain, epochs, model_name):
             
             contribution, df_reconstruction = model.contribution(df_falha, df_sistema, top_k=None)
             df_contribution = pd.DataFrame().from_dict(contribution).head(5) # Top 5 to save space/time
-            vars_to_plot = list(df_contribution['VARIAVEL'])
-            plot_reconstruction(df_falha, df_reconstruction, vars_to_plot, os.path.join(main_output_dir, f"{nome_base}_reconstruction.png"))
+            plot_reconstruction(df_falha, df_reconstruction, df_contribution, os.path.join(main_output_dir, f"{nome_base}_reconstruction.png"))
             
     elif dataset == "TE":
         dir_data = "data/TE_data/"
@@ -184,12 +209,23 @@ def run_experiment(dataset, gain, epochs, model_name):
             
             contribution, df_reconstruction = model.contribution(df_falha, df_sistema, top_k=None)
             df_contribution = pd.DataFrame().from_dict(contribution).head(5) # Top 5
-            vars_to_plot = list(df_contribution['VARIAVEL'])
-            plot_reconstruction(df_falha, df_reconstruction, vars_to_plot, os.path.join(main_output_dir, f"{nome_base}_reconstruction.png"))
+            plot_reconstruction(df_falha, df_reconstruction, df_contribution, os.path.join(main_output_dir, f"{nome_base}_reconstruction.png"))
     
     metrics_path = os.path.join(main_output_dir, f"metrics_{dataset}.json")
+    
+    experiment_data = {
+        "execution_params": {
+            "dataset": dataset,
+            "model": model_name,
+            "gain": gain,
+            "epochs": epochs,
+            "timestamp": datetime.now().isoformat()
+        },
+        "results": metrics_list
+    }
+    
     with open(metrics_path, "w") as f:
-        json.dump(metrics_list, f, indent=4)
+        json.dump(experiment_data, f, indent=4)
         
     print(f"Processamento concluído. Resultados salvos em {main_output_dir}")
     print(f"Métricas salvas em: {metrics_path}")
@@ -197,12 +233,12 @@ def run_experiment(dataset, gain, epochs, model_name):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run anomaly detection on CSTR or TE dataset.')
     parser.add_argument('--dataset', type=str, choices=['CSTR', 'TE'], required=True, help='Dataset to use (CSTR or TE)')
-    parser.add_argument('--gain', type=float, default=None, help='Threshold gain multiplier')
+    parser.add_argument('--gain', type=float, default=1.0, help='Threshold gain multiplier')
     parser.add_argument('--epochs', type=int, default=None, help='Number of training epochs')
-    parser.add_argument('--model', type=str, choices=['MSCVAE', 'PCA'], default='MSCVAE', help='Model to use (MSCVAE or PCA)')
+    parser.add_argument('--model', type=str, choices=['MSCVAE', 'PCA', 'ANN_AE', 'CNN_AE', 'LSTM_AE', 'MSCRED', 'OmniAnomaly', 'TranAD', 'USAD'], default='MSCVAE', help='Model to use')
     args = parser.parse_args()
     
-    gain = args.gain if args.gain is not None else (0.7 if args.dataset == 'CSTR' else 1.0)
+    gain = args.gain
     epochs = args.epochs if args.epochs is not None else (50 if args.dataset == 'CSTR' else 100)
     
     run_experiment(args.dataset, gain, epochs, args.model)
