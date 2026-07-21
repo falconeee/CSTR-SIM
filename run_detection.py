@@ -11,6 +11,7 @@ from plotly.subplots import make_subplots
 from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix
 
 from src.MSCVAE import MSCVAE
+from src.PCA import PCA
 
 def plot_predict(predictions, threshold, save_path):
     df = pd.DataFrame({
@@ -93,13 +94,18 @@ def compute_metrics(true_labels, pred_labels, nome_base, dataset):
         "tp": int(tp), "tn": int(tn), "fp": int(fp), "fn": int(fn)
     }
 
-def run_experiment(dataset, gain, epochs):
+def run_experiment(dataset, gain, epochs, model_name):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    main_output_dir = f"output/{dataset}_{timestamp}"
+    main_output_dir = f"output/{dataset}_{timestamp}_{model_name}"
     os.makedirs(main_output_dir, exist_ok=True)
     
     metrics_list = []
-    mscvae = MSCVAE()
+    if model_name == "MSCVAE":
+        model = MSCVAE()
+    elif model_name == "PCA":
+        model = PCA()
+    else:
+        raise ValueError(f"Model {model_name} not supported.")
     
     if dataset == "CSTR":
         dir_data = "data/CSTR_data/"
@@ -107,8 +113,8 @@ def run_experiment(dataset, gain, epochs):
         if "CLASS" in df_normal.columns:
             df_normal = df_normal.drop(columns=["CLASS"])
             
-        print(f"Training MSCVAE on CSTR normal data with gain {gain} for {epochs} epochs...")
-        mscvae.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
+        print(f"Training {model_name} on CSTR normal data with gain {gain} for {epochs} epochs...")
+        model.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
         
         df_sistema = pd.read_csv(os.path.join(dir_data, "CSTR_subsistema.csv"), sep=";")
         fault_files = glob.glob(os.path.join(dir_data, "falha*.csv"))
@@ -121,8 +127,8 @@ def run_experiment(dataset, gain, epochs):
             true_labels = np.where(df["CLASS"] == 'normal', 0, 1)
             df_falha = df.drop(columns=["CLASS"])
             
-            predictions = mscvae.predict(df_falha)
-            threshold = mscvae.threshold
+            predictions = model.predict(df_falha)
+            threshold = model.threshold
             pred_labels = (predictions['phi'] > threshold).astype(int)
             
             true_labels = true_labels[-len(pred_labels):]
@@ -131,7 +137,7 @@ def run_experiment(dataset, gain, epochs):
             
             plot_predict(predictions, threshold, os.path.join(main_output_dir, f"{nome_base}_predict.png"))
             
-            contribution, df_reconstruction = mscvae.contribution(df_falha, df_sistema, top_k=None)
+            contribution, df_reconstruction = model.contribution(df_falha, df_sistema, top_k=None)
             df_contribution = pd.DataFrame().from_dict(contribution).head(5) # Top 5 to save space/time
             vars_to_plot = list(df_contribution['VARIAVEL'])
             plot_reconstruction(df_falha, df_reconstruction, vars_to_plot, os.path.join(main_output_dir, f"{nome_base}_reconstruction.png"))
@@ -141,8 +147,8 @@ def run_experiment(dataset, gain, epochs):
         data_normal = sio.loadmat(os.path.join(dir_data, "fault_00.mat"))
         df_normal = pd.DataFrame(data_normal["trainingdata"])
         
-        print(f"Training MSCVAE on TE normal data with gain {gain} for {epochs} epochs...")
-        mscvae.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
+        print(f"Training {model_name} on TE normal data with gain {gain} for {epochs} epochs...")
+        model.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
         
         df_sistema = pd.DataFrame({
             "VARIAVEL": list(range(52)),
@@ -166,8 +172,8 @@ def run_experiment(dataset, gain, epochs):
             if len(df_falha) > 160:
                 true_labels[:160] = 0
                     
-            predictions = mscvae.predict(df_falha)
-            threshold = mscvae.threshold
+            predictions = model.predict(df_falha)
+            threshold = model.threshold
             pred_labels = (predictions['phi'] > threshold).astype(int)
             
             true_labels = true_labels[-len(pred_labels):]
@@ -176,7 +182,7 @@ def run_experiment(dataset, gain, epochs):
             
             plot_predict(predictions, threshold, os.path.join(main_output_dir, f"{nome_base}_predict.png"))
             
-            contribution, df_reconstruction = mscvae.contribution(df_falha, df_sistema, top_k=None)
+            contribution, df_reconstruction = model.contribution(df_falha, df_sistema, top_k=None)
             df_contribution = pd.DataFrame().from_dict(contribution).head(5) # Top 5
             vars_to_plot = list(df_contribution['VARIAVEL'])
             plot_reconstruction(df_falha, df_reconstruction, vars_to_plot, os.path.join(main_output_dir, f"{nome_base}_reconstruction.png"))
@@ -193,9 +199,10 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, choices=['CSTR', 'TE'], required=True, help='Dataset to use (CSTR or TE)')
     parser.add_argument('--gain', type=float, default=None, help='Threshold gain multiplier')
     parser.add_argument('--epochs', type=int, default=None, help='Number of training epochs')
+    parser.add_argument('--model', type=str, choices=['MSCVAE', 'PCA'], default='MSCVAE', help='Model to use (MSCVAE or PCA)')
     args = parser.parse_args()
     
     gain = args.gain if args.gain is not None else (0.7 if args.dataset == 'CSTR' else 1.0)
     epochs = args.epochs if args.epochs is not None else (50 if args.dataset == 'CSTR' else 100)
     
-    run_experiment(args.dataset, gain, epochs)
+    run_experiment(args.dataset, gain, epochs, args.model)
