@@ -180,9 +180,9 @@ def run_simulation(time_horizon, _faults):
     cstr.run()
     cstr.close()
     
-    data_path = './data/X_py.csv'
+    data_path = './data/X_py.parquet'
     if os.path.exists(data_path):
-        df = pd.read_csv(data_path, sep=';')
+        df = pd.read_parquet(data_path)
         return df
     return pd.DataFrame()
 

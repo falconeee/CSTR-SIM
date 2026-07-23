@@ -697,7 +697,24 @@ class CSTR():
             import pandas as pd
             import scipy.io as sio
             import os
+            import shutil
+            
             df = pd.read_csv(self.datafn, sep=";", decimal=".")
+            base_dir = os.path.dirname(self.datafn)
+            base_name = os.path.basename(self.datafn).replace(".csv", "")
+            
+            # Create subdirectories if they don't exist
+            csv_dir = os.path.join(base_dir, "csv_files")
+            mat_dir = os.path.join(base_dir, "mat_files")
+            os.makedirs(csv_dir, exist_ok=True)
+            os.makedirs(mat_dir, exist_ok=True)
+            
+            # Save parquet (Primary)
+            parquet_fn = os.path.join(base_dir, base_name + ".parquet")
+            df.to_parquet(parquet_fn, engine='pyarrow', compression='snappy')
+            print(f'Saved primary dataset as {parquet_fn}')
+            
+            # Save mat
             if 'CLASS' in df.columns:
                 labels = df['CLASS'].values.astype(str)
                 df_features = df.drop(columns=['CLASS'])
@@ -706,11 +723,17 @@ class CSTR():
                     'labels': labels,
                     'columns': df_features.columns.values.astype(str)
                 }
-                mat_fn = self.datafn.replace(".csv", ".mat")
+                mat_fn = os.path.join(mat_dir, base_name + ".mat")
                 sio.savemat(mat_fn, mat_dict)
-                print(f'Also saved as {mat_fn}')
+                print(f'Also saved .mat to {mat_fn}')
+                
+            # Move CSV
+            new_csv_fn = os.path.join(csv_dir, base_name + ".csv")
+            shutil.move(self.datafn, new_csv_fn)
+            print(f'Moved .csv to {new_csv_fn}')
+            
         except Exception as e:
-            print(f'Failed to save .mat file: {e}')
+            print(f'Failed to process file formats: {e}')
 
 def run_experiment(experiment, do_run=True, do_plot=True, do_plot_scatter=False):
     e = experiment

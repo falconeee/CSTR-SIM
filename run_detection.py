@@ -139,13 +139,27 @@ def run_experiment(dataset, gain, epochs, model_name):
     if dataset == "CSTR":
         dir_data = "data/CSTR_data/"
         
-        # Load Normal Data
-        mat_normal_path = os.path.join(dir_data, "normal.mat")
-        csv_normal_path = os.path.join(dir_data, "normal.csv")
+        # Look for Normal Data
+        parquet_normal_path = os.path.join(dir_data, "normal.parquet")
+        mat_normal_path = os.path.join("data/mat_files/CSTR_data", "normal.mat")
+        csv_normal_path = os.path.join("data/csv_files/CSTR_data", "normal.csv")
         
-        if os.path.exists(mat_normal_path):
+        # Helper to extract strings from MATLAB nested arrays safely
+        def extract_str(c):
+            if hasattr(c, 'item'):
+                try:
+                    val = c.item()
+                    if isinstance(val, str): return val.strip()
+                except: pass
+            return str(c).replace('[','').replace(']','').replace("'",'').replace('"','').strip()
+            
+        if os.path.exists(parquet_normal_path):
+            df_normal = pd.read_parquet(parquet_normal_path)
+            if "CLASS" in df_normal.columns:
+                df_normal = df_normal.drop(columns=["CLASS"])
+        elif os.path.exists(mat_normal_path):
             data_normal = sio.loadmat(mat_normal_path)
-            df_normal = pd.DataFrame(data_normal["testdata"], columns=[c.strip() for c in data_normal["columns"]])
+            df_normal = pd.DataFrame(data_normal["testdata"], columns=[extract_str(c) for c in np.squeeze(data_normal["columns"])])
         else:
             df_normal = pd.read_csv(csv_normal_path, sep=";", decimal=".")
             if "CLASS" in df_normal.columns:
@@ -154,23 +168,33 @@ def run_experiment(dataset, gain, epochs, model_name):
         print(f"Training {model_name} on CSTR normal data with gain {gain} for {epochs} epochs...")
         model.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
         
-        df_sistema = pd.read_csv(os.path.join(dir_data, "CSTR_subsistema.csv"), sep=";")
+        parquet_sistema = os.path.join(dir_data, "CSTR_subsistema.parquet")
+        if os.path.exists(parquet_sistema):
+            df_sistema = pd.read_parquet(parquet_sistema)
+        else:
+            df_sistema = pd.read_csv(os.path.join("data/csv_files/CSTR_data", "CSTR_subsistema.csv"), sep=";")
         
-        # Look for fault files (.mat preferred)
-        fault_files = glob.glob(os.path.join(dir_data, "falha*.mat"))
+        # Look for fault files (.parquet preferred)
+        fault_files = glob.glob(os.path.join(dir_data, "falha*.parquet"))
         if not fault_files:
-            fault_files = glob.glob(os.path.join(dir_data, "falha*.csv"))
+            fault_files = glob.glob(os.path.join("data/mat_files/CSTR_data", "falha*.mat"))
+        if not fault_files:
+            fault_files = glob.glob(os.path.join("data/csv_files/CSTR_data", "falha*.csv"))
         
         for file in fault_files:
             nome_base = os.path.splitext(os.path.basename(file))[0]
             print(f"Processing {nome_base}...")
             
-            if file.endswith('.mat'):
+            if file.endswith('.parquet'):
+                df = pd.read_parquet(file)
+                true_labels = np.where(df["CLASS"] == 'normal', 0, 1)
+                df_falha = df.drop(columns=["CLASS"])
+            elif file.endswith('.mat'):
                 data = sio.loadmat(file)
-                df_falha = pd.DataFrame(data["testdata"], columns=[c.strip() for c in data["columns"]])
+                df_falha = pd.DataFrame(data["testdata"], columns=[extract_str(c) for c in np.squeeze(data["columns"])])
                 raw_labels = data["labels"]
                 # raw_labels may be an array of strings like 'normal', 'normal', 'S17', ...
-                true_labels = np.array([0 if 'normal' in str(l) else 1 for l in raw_labels])
+                true_labels = np.array([0 if 'normal' in str(l) else 1 for l in np.ravel(raw_labels)])
             else:
                 df = pd.read_csv(file, sep=";", decimal=".")
                 true_labels = np.where(df["CLASS"] == 'normal', 0, 1)
@@ -192,8 +216,15 @@ def run_experiment(dataset, gain, epochs, model_name):
             
     elif dataset == "TE":
         dir_data = "data/TE_data/"
-        data_normal = sio.loadmat(os.path.join(dir_data, "fault_00.mat"))
-        df_normal = pd.DataFrame(data_normal["trainingdata"])
+        
+        parquet_normal_path = os.path.join(dir_data, "fault_00.parquet")
+        mat_normal_path = os.path.join("data/mat_files/TE_data", "fault_00.mat")
+        
+        if os.path.exists(parquet_normal_path):
+            df_normal = pd.read_parquet(parquet_normal_path)
+        else:
+            data_normal = sio.loadmat(mat_normal_path)
+            df_normal = pd.DataFrame(data_normal["trainingdata"])
         
         print(f"Training {model_name} on TE normal data with gain {gain} for {epochs} epochs...")
         model.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
@@ -204,7 +235,9 @@ def run_experiment(dataset, gain, epochs, model_name):
             "SISTEMA": ["TE"] * 52
         })
         
-        fault_files = glob.glob(os.path.join(dir_data, "fault_*.mat"))
+        fault_files = glob.glob(os.path.join(dir_data, "fault_*.parquet"))
+        if not fault_files:
+            fault_files = glob.glob(os.path.join("data/mat_files/TE_data", "fault_*.mat"))
         
         for file in fault_files:
             nome_base = os.path.splitext(os.path.basename(file))[0]
@@ -213,8 +246,11 @@ def run_experiment(dataset, gain, epochs, model_name):
             
             print(f"Processing {nome_base}...")
             
-            data = sio.loadmat(file)
-            df_falha = pd.DataFrame(data["testdata"])
+            if file.endswith('.parquet'):
+                df_falha = pd.read_parquet(file)
+            else:
+                data = sio.loadmat(file)
+                df_falha = pd.DataFrame(data["testdata"])
             
             true_labels = np.ones(len(df_falha))
             if len(df_falha) > 160:

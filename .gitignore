@@ -6,3 +6,5 @@ __pycache__/
 *.pkl
 *.txt
 TE_source/
+*/mat_files/
+*/csv_files/
