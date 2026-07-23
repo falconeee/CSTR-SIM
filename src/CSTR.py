@@ -693,6 +693,24 @@ class CSTR():
 
         print('Data Genaration successfully completed!')
 
+        try:
+            import pandas as pd
+            import scipy.io as sio
+            import os
+            df = pd.read_csv(self.datafn, sep=";", decimal=".")
+            if 'CLASS' in df.columns:
+                labels = df['CLASS'].values.astype(str)
+                df_features = df.drop(columns=['CLASS'])
+                mat_dict = {
+                    'testdata': df_features.values,
+                    'labels': labels,
+                    'columns': df_features.columns.values.astype(str)
+                }
+                mat_fn = self.datafn.replace(".csv", ".mat")
+                sio.savemat(mat_fn, mat_dict)
+                print(f'Also saved as {mat_fn}')
+        except Exception as e:
+            print(f'Failed to save .mat file: {e}')
 
 def run_experiment(experiment, do_run=True, do_plot=True, do_plot_scatter=False):
     e = experiment

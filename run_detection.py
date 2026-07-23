@@ -138,23 +138,43 @@ def run_experiment(dataset, gain, epochs, model_name):
     
     if dataset == "CSTR":
         dir_data = "data/CSTR_data/"
-        df_normal = pd.read_csv(os.path.join(dir_data, "normal.csv"), sep=";", decimal=".")
-        if "CLASS" in df_normal.columns:
-            df_normal = df_normal.drop(columns=["CLASS"])
+        
+        # Load Normal Data
+        mat_normal_path = os.path.join(dir_data, "normal.mat")
+        csv_normal_path = os.path.join(dir_data, "normal.csv")
+        
+        if os.path.exists(mat_normal_path):
+            data_normal = sio.loadmat(mat_normal_path)
+            df_normal = pd.DataFrame(data_normal["testdata"], columns=[c.strip() for c in data_normal["columns"]])
+        else:
+            df_normal = pd.read_csv(csv_normal_path, sep=";", decimal=".")
+            if "CLASS" in df_normal.columns:
+                df_normal = df_normal.drop(columns=["CLASS"])
             
         print(f"Training {model_name} on CSTR normal data with gain {gain} for {epochs} epochs...")
         model.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
         
         df_sistema = pd.read_csv(os.path.join(dir_data, "CSTR_subsistema.csv"), sep=";")
-        fault_files = glob.glob(os.path.join(dir_data, "falha*.csv"))
+        
+        # Look for fault files (.mat preferred)
+        fault_files = glob.glob(os.path.join(dir_data, "falha*.mat"))
+        if not fault_files:
+            fault_files = glob.glob(os.path.join(dir_data, "falha*.csv"))
         
         for file in fault_files:
             nome_base = os.path.splitext(os.path.basename(file))[0]
             print(f"Processing {nome_base}...")
             
-            df = pd.read_csv(file, sep=";", decimal=".")
-            true_labels = np.where(df["CLASS"] == 'normal', 0, 1)
-            df_falha = df.drop(columns=["CLASS"])
+            if file.endswith('.mat'):
+                data = sio.loadmat(file)
+                df_falha = pd.DataFrame(data["testdata"], columns=[c.strip() for c in data["columns"]])
+                raw_labels = data["labels"]
+                # raw_labels may be an array of strings like 'normal', 'normal', 'S17', ...
+                true_labels = np.array([0 if 'normal' in str(l) else 1 for l in raw_labels])
+            else:
+                df = pd.read_csv(file, sep=";", decimal=".")
+                true_labels = np.where(df["CLASS"] == 'normal', 0, 1)
+                df_falha = df.drop(columns=["CLASS"])
             
             predictions = model.predict(df_falha)
             threshold = model.threshold
