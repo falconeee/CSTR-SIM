@@ -11,6 +11,7 @@ from plotly.subplots import make_subplots
 from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix
 
 from src.MSCVAE import MSCVAE
+from src.MSCVAE_v2 import MSCVAE_v2
 from src.PCA import PCA
 from src.ANN_AE import ANN_AE
 from src.CNN_AE import CNN_AE
@@ -114,6 +115,8 @@ def run_experiment(dataset, gain, epochs, model_name):
     metrics_list = []
     if model_name == "MSCVAE":
         model = MSCVAE()
+    elif model_name == "MSCVAE_v2":
+        model = MSCVAE_v2()
     elif model_name == "PCA":
         model = PCA()
     elif model_name == "ANN_AE":
@@ -235,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, choices=['CSTR', 'TE'], required=True, help='Dataset to use (CSTR or TE)')
     parser.add_argument('--gain', type=float, default=1.0, help='Threshold gain multiplier')
     parser.add_argument('--epochs', type=int, default=None, help='Number of training epochs')
-    parser.add_argument('--model', type=str, choices=['MSCVAE', 'PCA', 'ANN_AE', 'CNN_AE', 'LSTM_AE', 'MSCRED', 'OmniAnomaly', 'TranAD', 'USAD'], default='MSCVAE', help='Model to use')
+    parser.add_argument('--model', type=str, choices=['MSCVAE', 'MSCVAE_v2', 'PCA', 'ANN_AE', 'CNN_AE', 'LSTM_AE', 'MSCRED', 'OmniAnomaly', 'TranAD', 'USAD'], default='MSCVAE', help='Model to use')
     args = parser.parse_args()
     
     gain = args.gain
