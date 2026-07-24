@@ -5,10 +5,11 @@ Este repositório aborda o problema de detecção de falhas e anomalias industri
 O objetivo principal deste projeto é treinar modelos de inteligência artificial de forma **não-supervisionada** nos dados de operação normal do processo e, em seguida, prever as anomalias nas bases de teste (dados com falha). O modelo analisa o erro de reconstrução e gera um índice para identificar desvios da normalidade, com base em um limiar (Threshold) calibrado. Vários modelos estão disponíveis para uso (MSCVAE, PCA, LSTM_AE, entre outros). No caso específico do modelo PCA, foi implementada uma análise aprimorada baseada no estado da arte com Q-statistic e contribuição por RBC (Reconstruction-Based Contribution).
 
 ## 🗂 Estrutura de Diretórios
-- `data/` -> Contém as pastas de dados originais (`CSTR_data/` com arquivos `.csv` e `TE_data/` com arquivos `.mat`).
-- `src/` -> Códigos fonte e implementações dos modelos preditivos (MSCVAE, MSCRED, etc).
+- `data/` -> Contém as bases de dados otimizadas em formato de alta performance `.parquet` (`CSTR_data/` e `TE_data/`). Arquivos legados estão organizados nas subpastas `csv_files/` e `mat_files/`.
+- `src/` -> Códigos fonte e implementações dos modelos preditivos (MSCVAE, PCA, etc).
 - `output/` -> Diretório gerado automaticamente que armazena as predições (gráficos de índice Phi, reconstrução das variáveis) e as métricas calculadas em formato `.json`.
-- `CSTR-Detection.ipynb` e `TE-Detection.ipynb` -> Notebooks interativos antigos de experimentação.
+- `notebooks/` -> Pasta contendo os notebooks interativos de experimentação (`CSTR-Detection.ipynb`, `TE-Detection.ipynb` e `CSTR-SIM.ipynb`).
+- `dashboard/` -> Contém o painel interativo (Digital Twin) construído com Streamlit para simulação visual do CSTR em tempo real.
 - `run_detection.py` -> Script principal em Python que realiza o treinamento, detecção massiva das falhas, plotagem e extração automática de métricas (F1-score, Recall, etc).
 
 ## 🚀 Como Executar
@@ -29,7 +30,7 @@ O arquivo `run_detection.py` automatiza todo o processo (treinamento e testes em
 
 **Parâmetros disponíveis:**
 * `--dataset`: Qual base utilizar (`CSTR` ou `TE`). **Obrigatório**.
-* `--model`: Qual modelo utilizar (MSCVAE, PCA, ANN_AE, CNN_AE, LSTM_AE, MSCRED, OmniAnomaly, TranAD, USAD). Padrão: `MSCVAE`.
+* `--model`: Qual modelo utilizar (MSCVAE, MSCVAE_v2, PCA, ANN_AE, CNN_AE, LSTM_AE, MSCRED, OmniAnomaly, TranAD, USAD). Padrão: `MSCVAE`.
 * `--gain`: Multiplicador de sensibilidade do limiar de alerta. Valores maiores reduzem alarmes falsos (menos sensível), valores menores aumentam a sensibilidade para anomalias sutis. Padrão: `1.0`.
 * `--epochs`: Número de épocas no treinamento. Padrão: `50` para CSTR, `100` para TE.
 
@@ -54,3 +55,9 @@ Para cada arquivo de falha (ex: `falha10.csv` ou `fault_01.mat`), o script salva
 
 Além dos gráficos, o script gerará também um consolidado global:
 * `metrics_<DATASET>.json`: Um arquivo contendo os parâmetros originais da execução (metadados como dataset, model, gain, epochs e timestamp) e todas as métricas detalhadas (**Precisão**, **Recall**, **F1-Score** e **FPR** - False Positive Rate) e a matriz de confusão crua (TP, FP, TN, FN) para todas as simulações, considerando os verdadeiros rótulos de momento de inserção das anomalias.
+
+### 4. Dashboard Interativo (Streamlit)
+Você pode executar o Digital Twin interativo do CSTR para visualizar dinâmicas de falha em tempo real através do navegador:
+```bash
+streamlit run dashboard/app.py
+```

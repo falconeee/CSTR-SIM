@@ -165,7 +165,10 @@ def run_experiment(dataset, gain, epochs, model_name):
             if "CLASS" in df_normal.columns:
                 df_normal = df_normal.drop(columns=["CLASS"])
             
-        print(f"Training {model_name} on CSTR normal data with gain {gain} for {epochs} epochs...")
+        if model_name == "PCA":
+            print(f"Training {model_name} on CSTR normal data with gain {gain}...")
+        else:
+            print(f"Training {model_name} on CSTR normal data with gain {gain} for {epochs} epochs...")
         model.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
         
         parquet_sistema = os.path.join(dir_data, "CSTR_subsistema.parquet")
@@ -226,7 +229,10 @@ def run_experiment(dataset, gain, epochs, model_name):
             data_normal = sio.loadmat(mat_normal_path)
             df_normal = pd.DataFrame(data_normal["trainingdata"])
         
-        print(f"Training {model_name} on TE normal data with gain {gain} for {epochs} epochs...")
+        if model_name == "PCA":
+            print(f"Training {model_name} on TE normal data with gain {gain}...")
+        else:
+            print(f"Training {model_name} on TE normal data with gain {gain} for {epochs} epochs...")
         model.fit([df_normal], gain=gain, epochs=epochs, verbose=True)
         
         df_sistema = pd.DataFrame({
